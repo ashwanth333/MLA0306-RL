@@ -1,0 +1,192 @@
+import numpy as np
+import random
+
+# ---------------------------------------------------------
+# ENVIRONMENT: 5x5 Grid Cleaning MDP
+# ---------------------------------------------------------
+
+class CleaningGridMDP:
+    def __init__(self, size=5):
+        self.size = size
+        self.start = (0, 0)
+
+        # dirt locations (+1)
+        self.dirt = {(0, 2), (2, 4), (3, 1), (4, 3)}
+
+        # obstacles (-1)
+        self.obstacles = {(1, 1), (2, 2), (4, 0)}
+
+        self.reset()
+
+    def reset(self):
+        self.agent = self.start
+        self.remaining_dirt = set(self.dirt)
+        return self.agent
+
+    def actions(self):
+        return ["UP", "DOWN", "LEFT", "RIGHT", "CLEAN"]
+
+    def step(self, action):
+        x, y = self.agent
+        reward = 0
+
+        if action == "UP":
+            nx, ny = max(0, x - 1), y
+        elif action == "DOWN":
+            nx, ny = min(self.size - 1, x + 1), y
+        elif action == "LEFT":
+            nx, ny = x, max(0, y - 1)
+        elif action == "RIGHT":
+            nx, ny = x, min(self.size - 1, y + 1)
+        elif action == "CLEAN":
+            nx, ny = x, y
+            if (x, y) in self.remaining_dirt:
+                reward = 1
+                self.remaining_dirt.remove((x, y))
+            return (x, y), reward, len(self.remaining_dirt) == 0
+
+        # movement result
+        if (nx, ny) in self.obstacles:
+            reward = -1
+        self.agent = (nx, ny)
+
+        done = len(self.remaining_dirt) == 0
+        return (nx, ny), reward, done
+
+
+# ---------------------------------------------------------
+# RANDOM POLICY
+# ---------------------------------------------------------
+
+def random_policy(env, steps=30):
+    total_reward = 0
+    state = env.reset()
+
+    for _ in range(steps):
+        action = random.choice(env.actions())
+        state, reward, done = env.step(action)
+        total_reward += reward
+        if done:
+            break
+
+    return total_reward
+
+
+# ---------------------------------------------------------
+# GREEDY POLICY (IMMEDIATE REWARD)
+# ---------------------------------------------------------
+def greedy_policy(env, steps=30):
+    total_reward = 0
+    state = env.reset()
+
+    def immediate_reward(action):
+        x, y = env.agent
+        if action == "CLEAN" and (x, y) in env.remaining_dirt:
+            return 1
+        if action == "UP":
+            return -1 if (max(0, x - 1), y) in env.obstacles else 0
+        if action == "DOWN":
+            return -1 if (min(env.size - 1, x + 1), y) in env.obstacles else 0
+        if action == "LEFT":
+            return -1 if (x, max(0, y - 1)) in env.obstacles else 0
+        if action == "RIGHT":
+            return -1 if (x, min(env.size - 1, y + 1)) in env.obstacles else 0
+        return 0
+
+    for _ in range(steps):
+        action = max(env.actions(), key=immediate_reward)
+        state, reward, done = env.step(action)
+        total_reward += reward
+        if done:
+            break
+
+    return total_reward
+
+
+# ---------------------------------------------------------
+# VALUE ITERATION → NEAR OPTIMAL POLICY
+# ---------------------------------------------------------
+def value_iteration(env, gamma=0.9, iterations=50):
+    V = {(i, j): 0 for i in range(env.size) for j in range(env.size)}
+
+    def transition_and_reward(state, action):
+        x, y = state
+
+        if action == "CLEAN":
+            if (x, y) in env.dirt:
+                return state, 1
+            return state, 0
+
+        if action == "UP":
+            nx, ny = max(0, x - 1), y
+        elif action == "DOWN":
+            nx, ny = min(env.size - 1, x + 1), y
+        elif action == "LEFT":
+            nx, ny = x, max(0, y - 1)
+        elif action == "RIGHT":
+            nx, ny = x, min(env.size - 1, y + 1)
+        else:
+            nx, ny = x, y
+
+        r = -1 if (nx, ny) in env.obstacles else 0
+        return (nx, ny), r
+
+    for _ in range(iterations):
+        new_V = V.copy()
+        for state in V:
+            best_value = -999
+            for action in env.actions():
+                ns, r = transition_and_reward(state, action)
+                value = r + gamma * V[ns]
+                best_value = max(best_value, value)
+            new_V[state] = best_value
+        V = new_V
+
+    # Construct policy
+    def policy(state):
+        x, y = state
+        bestA = None
+        bestV = -999
+
+        for action in env.actions():
+            ns, r = transition_and_reward(state, action)
+            value = r + gamma * V[ns]
+            if value > bestV:
+                bestV = value
+                bestA = action
+        return bestA
+
+    return policy, V
+
+
+def run_value_iteration_policy(env, max_steps=40):
+    policy, V = value_iteration(env)
+
+    state = env.reset()
+    total_reward = 0
+
+    for _ in range(max_steps):
+        action = policy(state)
+        state, reward, done = env.step(action)
+        total_reward += reward
+        if done:
+            break
+
+    return total_reward, V
+
+
+# ---------------------------------------------------------
+# MAIN RUN
+# ---------------------------------------------------------
+if __name__ == "__main__":
+    env = CleaningGridMDP()
+
+    print("\n--- RANDOM POLICY ---")
+    print("Total Reward:", random_policy(env))
+
+    print("\n--- GREEDY POLICY ---")
+    print("Total Reward:", greedy_policy(env))
+
+    print("\n--- VALUE ITERATION POLICY ---")
+    total, vals = run_value_iteration_policy(env)
+    print("Total Reward:", total)
